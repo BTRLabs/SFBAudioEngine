@@ -78,6 +78,19 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameOggVorbis = @"org.sbooth.Audi
 	if(file.tag())
 		[metadata addMetadataFromTagLibXiphComment:file.tag()];
 
+    const TagLib::List<TagLib::FLAC::Picture*> picList = reinterpret_cast<TagLib::Ogg::XiphComment*>(file.tag())->pictureList();
+    for(auto iter : picList) {
+        NSData *imageData = [NSData dataWithBytes:iter->data().data() length:iter->data().size()];
+
+        NSString *description = nil;
+        if(!iter->description().isEmpty())
+            description = [NSString stringWithUTF8String:iter->description().toCString(true)];
+
+        [metadata attachPicture:[[SFBAttachedPicture alloc] initWithImageData:imageData
+                                                                     type:(SFBAttachedPictureType)iter->type()
+                                                              description:description]];
+    }
+    
 	self.properties = [[SFBAudioProperties alloc] initWithDictionaryRepresentation:propertiesDictionary];
 	self.metadata = metadata;
 	return YES;
