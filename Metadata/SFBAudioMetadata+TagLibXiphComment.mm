@@ -134,7 +134,7 @@ TagLib::ByteVector EncodeBase64(const TagLib::ByteVector& input)
 		}
 		// Put all unknown tags into the additional metadata
 		else
-			[additionalMetadata setObject:value forKey:key];
+            [additionalMetadata setObject:value forKey:[key localizedUppercaseString]];
 	}
 }
 
