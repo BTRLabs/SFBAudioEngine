@@ -92,7 +92,7 @@
 				self.replayGainAlbumPeak = @(value.doubleValue);
 			// Put all unknown tags into the additional metadata
 			else
-				[additionalMetadata setObject:value forKey:[key localizedUppercaseString]];
+				[additionalMetadata setObject:value forKey:[key uppercaseString]];
 		}
 		else if(TagLib::APE::Item::Binary == item.type()) {
 			NSString *key = [NSString stringWithUTF8String:item.key().toCString(true)];
