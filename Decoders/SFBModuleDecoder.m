@@ -185,6 +185,9 @@ static dumb_off_t get_size_callback(void *f)
 	if(frameLength == 0)
 		return YES;
 
+    if(_framePosition >= _frameLength)
+        return YES;
+
 	AVAudioFrameCount framesProcessed = 0;
 
 	for(;;) {
@@ -199,7 +202,7 @@ static dumb_off_t get_size_callback(void *f)
 		framesProcessed += framesCopied;
 
 		// All requested frames were read or EOS reached
-		if(framesProcessed == frameLength || framesCopied == 0 || duh_sigrenderer_get_position(_dsr) > _frameLength)
+		if(framesProcessed == frameLength || framesCopied == 0 || framesCopied != framesToCopy || duh_sigrenderer_get_position(_dsr) > _frameLength)
 			break;
 	}
 
