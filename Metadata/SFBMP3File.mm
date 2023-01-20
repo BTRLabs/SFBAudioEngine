@@ -160,7 +160,7 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameMP3 = @"org.sbooth.AudioEngin
 
 	SFB::Audio::SetID3v2TagFromMetadata(self.metadata, file.ID3v2Tag(true));
 
-	if(!file.save()) {
+    if(!file.save(TagLib::MPEG::File::AllTags, true, 3)) {
 		if(error)
 			*error = [NSError SFB_errorWithDomain:SFBAudioFileErrorDomain
 											 code:SFBAudioFileErrorCodeInputOutput
