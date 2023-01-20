@@ -9,6 +9,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdocumentation"
 
+#import <taglib/commentsframe.h>
 #import <taglib/attachedpictureframe.h>
 #import <taglib/id3v2frame.h>
 #import <taglib/popularimeterframe.h>
@@ -330,7 +331,44 @@ void SFB::Audio::SetID3v2TagFromMetadata(SFBAudioMetadata *metadata, TagLib::ID3
 	}
 
 	// Comment
-	tag->setComment(TagLib::StringFromNSString(metadata.comment));
+    /*
+     COMM tags are used for other things beyond single generic comments (i.e., Apple
+     iTunes SoundCheck with a "description" of "ITUNNORM").  Therefore arbitarily
+     setting the text of the first CommentsFrame in the list as if it is a single generic
+     comment like what calling tag->setComment() does potentially deletes useful metadata
+     */
+    auto frameList = tag->frameListMap()["COMM"];
+    if(frameList.isEmpty()) {
+        if(metadata.comment) {
+            auto commentsFrame = new TagLib::ID3v2::CommentsFrame();
+            commentsFrame->setText(TagLib::StringFromNSString(metadata.comment));
+            tag->addFrame(commentsFrame);
+        }
+    }
+    else {
+        bool done = false;
+        for(auto frameIterator : frameList) {
+            TagLib::ID3v2::CommentsFrame *commentsFrame = dynamic_cast<TagLib::ID3v2::CommentsFrame *>(frameIterator);
+            if(commentsFrame->description().isEmpty()) {     //--- if this is blank it is a generic comment
+                if(metadata.comment) {
+                    commentsFrame->setText(TagLib::StringFromNSString(metadata.comment));
+                    done = true;
+                }
+                else {
+                    tag->removeFrame(commentsFrame);
+                    done = true;
+                }
+            }
+            else {
+                continue;
+            }
+        }
+        if(metadata.comment && !done) {
+            auto commentsFrame = new TagLib::ID3v2::CommentsFrame();
+            commentsFrame->setText(TagLib::StringFromNSString(metadata.comment));
+            tag->addFrame(commentsFrame);
+        }
+    }
 
 	// Album artist
 	tag->removeFrames("TPE2");
