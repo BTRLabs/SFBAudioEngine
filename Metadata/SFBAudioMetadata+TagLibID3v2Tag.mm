@@ -323,7 +323,10 @@ void SFB::Audio::SetID3v2TagFromMetadata(SFBAudioMetadata *metadata, TagLib::ID3
 			auto frame = new TagLib::ID3v2::TextIdentificationFrame("TDRC", TagLib::String::Latin1);
 			frame->setText(TagLib::StringFromNSString(metadata.releaseDate));
 			tag->addFrame(frame);
-		}
+        }
+        else if (metadata.releaseDate.length == 4 && metadata.releaseDate.integerValue > 0) {
+            tag->setYear((unsigned int)metadata.releaseDate.integerValue);
+        }
 	}
 
 	// Comment
