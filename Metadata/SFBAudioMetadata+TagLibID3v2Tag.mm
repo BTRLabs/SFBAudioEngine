@@ -355,7 +355,9 @@ void SFB::Audio::SetID3v2TagFromMetadata(SFBAudioMetadata *metadata, TagLib::ID3
 	tag->removeFrames("POPM");
 	if(metadata.rating != nil) {
 		TagLib::ID3v2::PopularimeterFrame *frame = new TagLib::ID3v2::PopularimeterFrame();
+        frame->setEmail("Windows Media Player 9 Series");
 		frame->setRating(metadata.rating.intValue);
+        frame->setCounter(0);
 		tag->addFrame(frame);
 	}
 
