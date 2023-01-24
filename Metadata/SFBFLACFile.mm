@@ -153,7 +153,8 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameFLAC = @"org.sbooth.AudioEngi
 
 	SFB::Audio::SetXiphCommentFromMetadata(self.metadata, file.xiphComment());
 
-	// Add album art
+	// Add/Update/Remove Album Art
+    file.removePictures();
 	for(SFBAttachedPicture *attachedPicture in self.metadata.attachedPictures) {
 		SFB::CGImageSource imageSource(CGImageSourceCreateWithData((__bridge CFDataRef)attachedPicture.imageData, nullptr));
 		if(!imageSource)
