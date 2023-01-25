@@ -22,6 +22,7 @@
 
 #import "AddAudioPropertiesToDictionary.h"
 #import "NSError+SFBURLPresentation.h"
+#import "SFBAudioMetadata+TagLibTag.h"
 #import "SFBAudioMetadata+TagLibID3v1Tag.h"
 #import "SFBAudioMetadata+TagLibID3v2Tag.h"
 #import "SFBAudioMetadata+TagLibXiphComment.h"
@@ -99,18 +100,7 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameFLAC = @"org.sbooth.AudioEngi
 	if(file.hasXiphComment())
 		[metadata addMetadataFromTagLibXiphComment:file.xiphComment()];
 
-	// Add album art
-	for(auto iter : file.pictureList()) {
-		NSData *imageData = [NSData dataWithBytes:iter->data().data() length:iter->data().size()];
-
-		NSString *description = nil;
-		if(!iter->description().isEmpty())
-			description = [NSString stringWithUTF8String:iter->description().toCString(true)];
-
-		[metadata attachPicture:[[SFBAttachedPicture alloc] initWithImageData:imageData
-																	 type:(SFBAttachedPictureType)iter->type()
-															  description:description]];
-	}
+    SFB::Audio::AttachFLACPicturesToMetadata(metadata, file.pictureList());
 
 	self.properties = [[SFBAudioProperties alloc] initWithDictionaryRepresentation:propertiesDictionary];
 	self.metadata = metadata;
@@ -151,40 +141,9 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameFLAC = @"org.sbooth.AudioEngi
 	if(file.hasID3v2Tag())
 		SFB::Audio::SetID3v2TagFromMetadata(self.metadata, file.ID3v2Tag());
 
-	SFB::Audio::SetXiphCommentFromMetadata(self.metadata, file.xiphComment());
+	SFB::Audio::SetXiphCommentFromMetadata(self.metadata, file.xiphComment(), false);
 
-	// Add/Update/Remove Album Art
-    file.removePictures();
-	for(SFBAttachedPicture *attachedPicture in self.metadata.attachedPictures) {
-		SFB::CGImageSource imageSource(CGImageSourceCreateWithData((__bridge CFDataRef)attachedPicture.imageData, nullptr));
-		if(!imageSource)
-			continue;
-
-		TagLib::FLAC::Picture *picture = new TagLib::FLAC::Picture();
-		picture->setData(TagLib::ByteVector((const char *)attachedPicture.imageData.bytes, (size_t)attachedPicture.imageData.length));
-		picture->setType((TagLib::FLAC::Picture::Type)attachedPicture.pictureType);
-		if(attachedPicture.pictureDescription)
-			picture->setDescription(TagLib::StringFromNSString(attachedPicture.pictureDescription));
-
-		// Convert the image's UTI into a MIME type
-		NSString *mimeType = (__bridge_transfer NSString *)UTTypeCopyPreferredTagWithClass(CGImageSourceGetType(imageSource), kUTTagClassMIMEType);
-		if(mimeType)
-			picture->setMimeType(TagLib::StringFromNSString(mimeType));
-
-		// Flesh out the height, width, and depth
-		NSDictionary *imagePropertiesDictionary = (__bridge_transfer NSDictionary *)CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nullptr);
-		if(imagePropertiesDictionary) {
-			NSNumber *imageWidth = imagePropertiesDictionary[(__bridge NSString *)kCGImagePropertyPixelWidth];
-			NSNumber *imageHeight = imagePropertiesDictionary[(__bridge NSString *)kCGImagePropertyPixelHeight];
-			NSNumber *imageDepth = imagePropertiesDictionary[(__bridge NSString *)kCGImagePropertyDepth];
-
-			picture->setHeight(imageHeight.intValue);
-			picture->setWidth(imageWidth.intValue);
-			picture->setColorDepth(imageDepth.intValue);
-		}
-
-		file.addPicture(picture);
-	}
+    SFB::Audio::SetAttachedPicturesAsFLACPictures(self.metadata, &file, true);
 
 	if(!file.save()) {
 		if(error)

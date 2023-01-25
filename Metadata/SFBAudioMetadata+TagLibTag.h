@@ -7,6 +7,7 @@
 #pragma once
 
 #import <taglib/tag.h>
+#import <taglib/flacfile.h>
 
 #import "SFBAudioMetadata.h"
 
@@ -19,6 +20,10 @@ NS_ASSUME_NONNULL_BEGIN
 namespace SFB {
 	namespace Audio {
 		void SetTagFromMetadata(SFBAudioMetadata *metadata, TagLib::Tag *tag);
+        void AttachFLACPicturesToMetadata(SFBAudioMetadata *metadata, TagLib::List<TagLib::FLAC::Picture*> pictureList);
+        void SetAttachedPicturesAsFLACPictures(SFBAudioMetadata *metadata, TagLib::Ogg::XiphComment *tag, bool removeExisting);
+        void SetAttachedPicturesAsFLACPictures(SFBAudioMetadata *metadata, TagLib::FLAC::File *file, bool removeExisting);
+        TagLib::FLAC::Picture* CreateFLACPicture(SFBAttachedPicture *attachedPicture);
 	}
 }
 
