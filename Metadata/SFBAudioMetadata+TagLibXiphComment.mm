@@ -136,6 +136,8 @@ TagLib::ByteVector EncodeBase64(const TagLib::ByteVector& input)
 		else
             [additionalMetadata setObject:value forKey:[key uppercaseString]];
 	}
+    if(additionalMetadata.count)
+        self.additionalMetadata = additionalMetadata;
 }
 
 @end
