@@ -180,6 +180,18 @@ static 	opus_int64 tell_callback(void *stream)
 
 	_sourceFormat = [[AVAudioFormat alloc] initWithStreamDescription:&sourceStreamDescription];
 
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+    dictionary[@"VERSION"]              = [@(header->version) stringValue];
+    dictionary[@"CHANNEL_COUNT"]        = [@(header->channel_count) stringValue];
+    dictionary[@"PRE_SKIP"]             = [@(header->pre_skip) stringValue];
+    dictionary[@"INPUT_SAMPLE_RATE"]    = [@(header->input_sample_rate) stringValue];
+    dictionary[@"OUTPUT_GAIN"]          = [@(header->output_gain) stringValue];
+    dictionary[@"MAPPING_FAMILY"]       = [@(header->mapping_family) stringValue];
+    dictionary[@"STREAM_COUNT"]         = [@(header->stream_count) stringValue];
+    dictionary[@"COUPLED_COUNT"]        = [@(header->coupled_count) stringValue];
+//    dictionary[@"MAPPING"]              = [[NSString alloc] initWithUTF8String:header->mapping];      //--- this isn't correct, but not obvious what would be
+    self.properties = [dictionary copy];
+
 	return YES;
 }
 

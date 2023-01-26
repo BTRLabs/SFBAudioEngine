@@ -185,7 +185,10 @@ static NSMutableArray *_registeredSubclasses = nil;
 	}
 
 	if((self = [[subclass alloc] init]))
-		_inputSource = inputSource;
+    {
+        _inputSource = inputSource;
+        _properties = [[NSMutableDictionary alloc] init];
+    }
 
 	return self;
 }
@@ -223,7 +226,10 @@ static NSMutableArray *_registeredSubclasses = nil;
 	}
 
 	if((self = [[subclass alloc] init]))
-		_inputSource = inputSource;
+    {
+        _inputSource = inputSource;
+        _properties = [[NSMutableDictionary alloc] init];
+    }
 
 	return self;
 }
