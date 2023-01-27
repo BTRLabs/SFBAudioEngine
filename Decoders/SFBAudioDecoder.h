@@ -56,7 +56,7 @@ NS_SWIFT_NAME(AudioDecoder) @interface SFBAudioDecoder : NSObject <SFBPCMDecodin
 + (BOOL)handlesMIMEType:(NSString *)mimeType;
 
 /// Returns a dictionary containing codec file specific properties
-@property (nonatomic) NSMutableDictionary *properties;
+@property (nonatomic) NSDictionary *properties;
 
 #pragma mark - Creation
 

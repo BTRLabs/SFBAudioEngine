@@ -135,6 +135,8 @@ static mpc_bool_t canseek_callback(mpc_reader *p_reader)
 	mpc_streaminfo streaminfo;
 	mpc_demux_get_info(_demux, &streaminfo);
 
+    [self AddStreamInfoToPropertiesDictionary:streaminfo];
+
 	_frameLength = mpc_streaminfo_get_length_samples(&streaminfo);
 
 	AVAudioChannelLayout *channelLayout = nil;
@@ -165,6 +167,47 @@ static mpc_bool_t canseek_callback(mpc_reader *p_reader)
 	_buffer.frameLength = 0;
 
 	return YES;
+}
+
+- (void)AddStreamInfoToPropertiesDictionary:(mpc_streaminfo)streaminfo
+{
+    NSMutableDictionary *dictionary = [NSMutableDictionary dictionary];
+
+    //--- Core mpc stream properties
+    dictionary[@"SAMPLE_FREQ"]          = [@(streaminfo.sample_freq) stringValue];
+    dictionary[@"CHANNELS"]             = [@(streaminfo.channels) stringValue];
+    dictionary[@"STREAM_VERSION"]       = [@(streaminfo.stream_version) stringValue];
+    dictionary[@"BITRATE"]              = [@(streaminfo.bitrate) stringValue];
+    dictionary[@"AVERAGE_BITRATE"]      = [@(streaminfo.average_bitrate) stringValue];
+    dictionary[@"MAX_BAND"]             = [@(streaminfo.max_band) stringValue];
+    dictionary[@"MS"]                   = [@(streaminfo.ms) stringValue];
+    dictionary[@"FAST_SEEK"]            = [@(streaminfo.fast_seek) stringValue];
+    dictionary[@"BLOCK_PWR"]            = [@(streaminfo.block_pwr) stringValue];
+
+    //--- Replaygain properties
+    //--- Musepack stores these here in the file header instead of in the metadata tags
+    dictionary[@"GAIN_TITLE"]           = [@(streaminfo.gain_title) stringValue];
+    dictionary[@"PEAK_TITLE"]           = [@(streaminfo.peak_title) stringValue];
+    dictionary[@"GAIN_ALBUM"]           = [@(streaminfo.gain_album) stringValue];
+    dictionary[@"PEAK_ALBUM"]           = [@(streaminfo.peak_album) stringValue];
+
+    //--- True gapless properties
+    dictionary[@"IS_TRUE_GAPLESS"]      = [@(streaminfo.is_true_gapless) stringValue];
+    dictionary[@"SAMPLES"]              = [@(streaminfo.samples) stringValue];
+    dictionary[@"BEG_SILENCE"]          = [@(streaminfo.beg_silence) stringValue];
+
+    //--- Encoder informations
+    dictionary[@"ENCODER_VERSION"]      = [@(streaminfo.encoder_version) stringValue];
+    dictionary[@"ENCODER"]              = @(streaminfo.encoder);
+    dictionary[@"PNS"]                  = [@(streaminfo.pns) stringValue];
+    dictionary[@"PROFILE"]              = [@(streaminfo.profile) stringValue];
+    dictionary[@"PROFILE_NAME"]         = @(streaminfo.profile_name);
+    
+    dictionary[@"HEADER_POSITION"]      = [@(streaminfo.header_position) stringValue];
+    dictionary[@"TAG_OFFSET"]           = [@(streaminfo.tag_offset) stringValue];
+    dictionary[@"TOTAL_FILE_LENGTH"]    = [@(streaminfo.total_file_length) stringValue];
+    
+    self.properties = [dictionary copy];
 }
 
 - (BOOL)closeReturningError:(NSError **)error
