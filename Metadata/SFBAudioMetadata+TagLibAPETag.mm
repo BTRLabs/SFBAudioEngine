@@ -9,6 +9,23 @@
 
 @implementation SFBAudioMetadata (TagLibAPETag)
 
+/*
+ NOTE(2023-01-27): While no "standard" exists, the TagLib::APE::Item keys referenced below
+ are based on the following, taking care to closely mirror Picard.
+ 
+ https://wiki.hydrogenaud.io/index.php?title=APE_key
+ https://wiki.hydrogenaud.io/index.php?title=Tag_Mapping
+ https://picard-docs.musicbrainz.org/en/appendices/tag_mapping.html
+
+ addMetadataFromTagLibAPETag() attempts to cover all variations "seen in the wild", while
+ SetAPETagFromMetadata() prefers the variation listed and removes any "non-standard" Item's.
+ 
+ Exceptions when writing are:
+    - use of UPPERCASE versions of tag names over Mixed Case versions
+    - use of TRACK and TOTALTRACKS over only TRACK formatted as "trackNumber/trackTotal"
+    - use of DISC and TOTALDISCS over only DISC formatted as "discNumber/discTotal"
+ */
+
 - (void)addMetadataFromTagLibAPETag:(const TagLib::APE::Tag *)tag
 {
 	NSParameterAssert(tag != nil);
@@ -32,27 +49,47 @@
 				self.albumTitle = value;
 			else if([key caseInsensitiveCompare:@"ARTIST"] == NSOrderedSame)
 				self.artist = value;
-			else if([key caseInsensitiveCompare:@"ALBUMARTIST"] == NSOrderedSame)
+			else if([key caseInsensitiveCompare:@"ALBUM ARTIST"] == NSOrderedSame || [key caseInsensitiveCompare:@"ALBUMARTIST"] == NSOrderedSame)
 				self.albumArtist = value;
 			else if([key caseInsensitiveCompare:@"COMPOSER"] == NSOrderedSame)
 				self.composer = value;
 			else if([key caseInsensitiveCompare:@"GENRE"] == NSOrderedSame)
 				self.genre = value;
-			else if([key caseInsensitiveCompare:@"DATE"] == NSOrderedSame)
+			else if([key caseInsensitiveCompare:@"YEAR"] == NSOrderedSame || [key caseInsensitiveCompare:@"DATE"] == NSOrderedSame)
 				self.releaseDate = value;
-			else if([key caseInsensitiveCompare:@"DESCRIPTION"] == NSOrderedSame)
+			else if([key caseInsensitiveCompare:@"COMMENT"] == NSOrderedSame || [key caseInsensitiveCompare:@"DESCRIPTION"] == NSOrderedSame)
 				self.comment = value;
 			else if([key caseInsensitiveCompare:@"TITLE"] == NSOrderedSame)
 				self.title = value;
-			else if([key caseInsensitiveCompare:@"TRACKNUMBER"] == NSOrderedSame)
-				self.trackNumber = @(value.integerValue);
-			else if([key caseInsensitiveCompare:@"TRACKTOTAL"] == NSOrderedSame)
+            else if([key caseInsensitiveCompare:@"TRACK"] == NSOrderedSame || [key caseInsensitiveCompare:@"TRACKNUMBER"] == NSOrderedSame) {
+                if([value containsString:@"/"]) {
+                    NSArray<NSString *> *parts = [value componentsSeparatedByString:@"/"];
+                    if(parts.count == 2) {
+                        self.trackNumber = @(parts[0].integerValue);
+                        self.trackTotal = @(parts[1].integerValue);
+                    }
+                }
+                else {
+                    self.trackNumber = @(value.integerValue);
+                }
+            }
+			else if([key caseInsensitiveCompare:@"TOTALTRACKS"] == NSOrderedSame || [key caseInsensitiveCompare:@"TRACKTOTAL"] == NSOrderedSame)
 				self.trackTotal = @(value.integerValue);
 			else if([key caseInsensitiveCompare:@"COMPILATION"] == NSOrderedSame)
 				self.compilation = @(value.boolValue);
-			else if([key caseInsensitiveCompare:@"DISCNUMBER"] == NSOrderedSame)
-				self.discNumber = @(value.integerValue);
-			else if([key caseInsensitiveCompare:@"DISCTOTAL"] == NSOrderedSame)
+            else if([key caseInsensitiveCompare:@"DISC"] == NSOrderedSame || [key caseInsensitiveCompare:@"DISCNUMBER"] == NSOrderedSame) {
+                if([value containsString:@"/"]) {
+                    NSArray<NSString *> *parts = [value componentsSeparatedByString:@"/"];
+                    if(parts.count == 2) {
+                        self.discNumber = @(parts[0].integerValue);
+                        self.discTotal = @(parts[1].integerValue);
+                    }
+                }
+                else {
+                    self.discNumber = @(value.integerValue);
+                }
+            }
+			else if([key caseInsensitiveCompare:@"TOTALDISCS"] == NSOrderedSame || [key caseInsensitiveCompare:@"DISCTOTAL"] == NSOrderedSame)
 				self.discTotal = @(value.integerValue);
 			else if([key caseInsensitiveCompare:@"LYRICS"] == NSOrderedSame)
 				self.lyrics = value;
@@ -70,7 +107,7 @@
 				self.musicBrainzRecordingID = value;
 			else if([key caseInsensitiveCompare:@"TITLESORT"] == NSOrderedSame)
 				self.titleSortOrder = value;
-			else if([key caseInsensitiveCompare:@"ALBUMTITLESORT"] == NSOrderedSame)
+			else if([key caseInsensitiveCompare:@"ALBUMSORT"] == NSOrderedSame || [key caseInsensitiveCompare:@"ALBUMTITLESORT"] == NSOrderedSame)
 				self.albumTitleSortOrder = value;
 			else if([key caseInsensitiveCompare:@"ARTISTSORT"] == NSOrderedSame)
 				self.artistSortOrder = value;
@@ -174,20 +211,30 @@ void SFB::Audio::SetAPETagFromMetadata(SFBAudioMetadata *metadata, TagLib::APE::
 	NSCParameterAssert(metadata != nil);
 	assert(nullptr != tag);
 
+    // Remove "Non-Standard" keyed tags to avoid duplicate tags under different keys
+    tag->removeItem("ALBUMARTIST");
+    tag->removeItem("DATE");
+    tag->removeItem("DESCRIPTION");
+    tag->removeItem("TRACKNUMBER");
+    tag->removeItem("TRACKTOTAL");
+    tag->removeItem("DISCNUMBER");
+    tag->removeItem("DISCTOTAL");
+    tag->removeItem("ALBUMTITLESORT");
+
 	// Standard tags
 	SetAPETag(tag, "ALBUM", metadata.albumTitle);
 	SetAPETag(tag, "ARTIST", metadata.artist);
-	SetAPETag(tag, "ALBUMARTIST", metadata.albumArtist);
+	SetAPETag(tag, "ALBUM ARTIST", metadata.albumArtist);
 	SetAPETag(tag, "COMPOSER", metadata.composer);
 	SetAPETag(tag, "GENRE", metadata.genre);
-	SetAPETag(tag, "DATE", metadata.releaseDate);
-	SetAPETag(tag, "DESCRIPTION", metadata.comment);
+	SetAPETag(tag, "YEAR", metadata.releaseDate);
+	SetAPETag(tag, "COMMENT", metadata.comment);
 	SetAPETag(tag, "TITLE", metadata.title);
-	SetAPETagNumber(tag, "TRACKNUMBER", metadata.trackNumber);
-	SetAPETagNumber(tag, "TRACKTOTAL", metadata.trackTotal);
+	SetAPETagNumber(tag, "TRACK", metadata.trackNumber);
+	SetAPETagNumber(tag, "TOTALTRACKS", metadata.trackTotal);
 	SetAPETagBoolean(tag, "COMPILATION", metadata.compilation);
-	SetAPETagNumber(tag, "DISCNUMBER", metadata.discNumber);
-	SetAPETagNumber(tag, "DISCTOTAL", metadata.discTotal);
+	SetAPETagNumber(tag, "DISC", metadata.discNumber);
+	SetAPETagNumber(tag, "TOTALDISCS", metadata.discTotal);
 	SetAPETagNumber(tag, "BPM", metadata.bpm);
 	SetAPETagNumber(tag, "RATING", metadata.rating);
 	SetAPETag(tag, "ISRC", metadata.isrc);
@@ -195,7 +242,7 @@ void SFB::Audio::SetAPETagFromMetadata(SFBAudioMetadata *metadata, TagLib::APE::
 	SetAPETag(tag, "MUSICBRAINZ_ALBUMID", metadata.musicBrainzReleaseID);
 	SetAPETag(tag, "MUSICBRAINZ_TRACKID", metadata.musicBrainzRecordingID);
 	SetAPETag(tag, "TITLESORT", metadata.titleSortOrder);
-	SetAPETag(tag, "ALBUMTITLESORT", metadata.albumTitleSortOrder);
+	SetAPETag(tag, "ALBUMSORT", metadata.albumTitleSortOrder);
 	SetAPETag(tag, "ARTISTSORT", metadata.artistSortOrder);
 	SetAPETag(tag, "ALBUMARTISTSORT", metadata.albumArtistSortOrder);
 	SetAPETag(tag, "COMPOSERSORT", metadata.composerSortOrder);
