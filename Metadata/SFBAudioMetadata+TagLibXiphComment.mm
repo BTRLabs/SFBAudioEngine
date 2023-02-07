@@ -34,6 +34,23 @@ TagLib::ByteVector EncodeBase64(const TagLib::ByteVector& input)
 
 @implementation SFBAudioMetadata (TagLibXiphComment)
 
+/*
+ NOTE(2023-02-07): While no "standard" exists, the TagLib::Ogg::XiphComment keys referenced below
+ are based on the following, taking care to closely mirror Picard.
+ 
+ https://wiki.hydrogenaud.io/index.php?title=APE_key
+ https://wiki.hydrogenaud.io/index.php?title=Tag_Mapping
+ https://picard-docs.musicbrainz.org/en/appendices/tag_mapping.html
+
+ addMetadataFromTagLibXiphComment() attempts to cover all variations "seen in the wild", while
+ SetXiphCommentFromMetadata() prefers the variation listed and removes any "non-standard" Item's.
+ 
+ Exceptions when writing are:
+    - use of UPPERCASE versions of tag names over Mixed Case versions
+    - use of TRACK and TOTALTRACKS over only TRACK formatted as "trackNumber/trackTotal"
+    - use of DISC and TOTALDISCS over only DISC formatted as "discNumber/discTotal"
+ */
+
 - (void)addMetadataFromTagLibXiphComment:(const TagLib::Ogg::XiphComment *)tag
 {
 	NSParameterAssert(tag != nil);
@@ -65,13 +82,13 @@ TagLib::ByteVector EncodeBase64(const TagLib::ByteVector& input)
 			self.title = value;
 		else if([key caseInsensitiveCompare:@"TRACKNUMBER"] == NSOrderedSame)
 			self.trackNumber = @(value.integerValue);
-		else if([key caseInsensitiveCompare:@"TRACKTOTAL"] == NSOrderedSame)
+		else if([key caseInsensitiveCompare:@"TRACKTOTAL"] == NSOrderedSame || [key caseInsensitiveCompare:@"TOTALTRACKS"] == NSOrderedSame)
 			self.trackTotal = @(value.integerValue);
 		else if([key caseInsensitiveCompare:@"COMPILATION"] == NSOrderedSame)
 			self.compilation = @(value.boolValue);
 		else if([key caseInsensitiveCompare:@"DISCNUMBER"] == NSOrderedSame)
 			self.discNumber = @(value.integerValue);
-		else if([key caseInsensitiveCompare:@"DISCTOTAL"] == NSOrderedSame)
+		else if([key caseInsensitiveCompare:@"DISCTOTAL"] == NSOrderedSame || [key caseInsensitiveCompare:@"TOTALDISCS"] == NSOrderedSame)
 			self.discTotal = @(value.integerValue);
 		else if([key caseInsensitiveCompare:@"LYRICS"] == NSOrderedSame)
 			self.lyrics = value;
@@ -89,7 +106,7 @@ TagLib::ByteVector EncodeBase64(const TagLib::ByteVector& input)
 			self.musicBrainzRecordingID = value;
 		else if([key caseInsensitiveCompare:@"TITLESORT"] == NSOrderedSame)
 			self.titleSortOrder = value;
-		else if([key caseInsensitiveCompare:@"ALBUMTITLESORT"] == NSOrderedSame)
+		else if([key caseInsensitiveCompare:@"ALBUMSORT"] == NSOrderedSame || [key caseInsensitiveCompare:@"ALBUMTITLESORT"] == NSOrderedSame)
 			self.albumTitleSortOrder = value;
 		else if([key caseInsensitiveCompare:@"ARTISTSORT"] == NSOrderedSame)
 			self.artistSortOrder = value;
@@ -190,6 +207,11 @@ void SFB::Audio::SetXiphCommentFromMetadata(SFBAudioMetadata *metadata, TagLib::
 	NSCParameterAssert(metadata != nil);
 	assert(nullptr != tag);
 
+    // Remove "Non-Standard" keyed tags to avoid duplicate tags under different keys
+    tag->removeFields("ALBUMTITLESORT");
+    tag->removeFields("TOTALTRACKS");
+    tag->removeFields("TOTALDISCS");
+
 	// Standard tags
 	SetXiphComment(tag, "ALBUM", metadata.albumTitle);
 	SetXiphComment(tag, "ARTIST", metadata.artist);
@@ -212,7 +234,7 @@ void SFB::Audio::SetXiphCommentFromMetadata(SFBAudioMetadata *metadata, TagLib::
 	SetXiphComment(tag, "MUSICBRAINZ_ALBUMID", metadata.musicBrainzReleaseID);
 	SetXiphComment(tag, "MUSICBRAINZ_TRACKID", metadata.musicBrainzRecordingID);
 	SetXiphComment(tag, "TITLESORT", metadata.titleSortOrder);
-	SetXiphComment(tag, "ALBUMTITLESORT", metadata.albumTitleSortOrder);
+	SetXiphComment(tag, "ALBUMSORT", metadata.albumTitleSortOrder);
 	SetXiphComment(tag, "ARTISTSORT", metadata.artistSortOrder);
 	SetXiphComment(tag, "ALBUMARTISTSORT", metadata.albumArtistSortOrder);
 	SetXiphComment(tag, "COMPOSERSORT", metadata.composerSortOrder);
