@@ -136,7 +136,11 @@ NS_SWIFT_NAME(AudioFile) @interface SFBAudioFile : NSObject
 
 /// Writes metadata
 /// @param error An optional pointer to an \c NSError object to receive error information
+/// @param options An optional pointer to an \c NSDictionary object containing additional options for use during the tag writing and file saving process
 /// @return \c YES if successful, \c NO otherwise
+/// @note Use of values in the options dictionary is specific to each concrete SFBAudioFile implementation.
+///
+/// For example, SFBMP3File looks for a key of \c ID3V2VERSION with a value of \c 3 in order to override the saving of ID3v2 tags as ID3v2.3 instead of ID3v2.4.
 - (BOOL)writeMetadataReturningError:(nullable NSDictionary *)options :(NSError **)error NS_SWIFT_NAME(writeMetadata(options:));
 
 @end
