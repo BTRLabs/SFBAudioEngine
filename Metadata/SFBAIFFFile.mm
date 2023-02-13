@@ -92,6 +92,11 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameAIFF = @"org.sbooth.AudioEngi
 
 - (BOOL)writeMetadataReturningError:(NSError **)error
 {
+    return [self writeMetadataReturningError:nil :error];
+}
+
+- (BOOL)writeMetadataReturningError:(nullable NSDictionary *)options :(NSError **)error
+{
 	TagLib::FileStream stream(self.url.fileSystemRepresentation);
 	if(!stream.isOpen()) {
 		if(error)

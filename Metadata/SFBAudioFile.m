@@ -229,6 +229,12 @@ static NSMutableArray *_registeredSubclasses = nil;
 	__builtin_unreachable();
 }
 
+- (BOOL)writeMetadataReturningError:(nullable NSDictionary *)options :(NSError **)error
+{
+    [self doesNotRecognizeSelector:_cmd];
+    __builtin_unreachable();
+}
+
 @end
 
 @implementation SFBAudioFileSubclassInfo

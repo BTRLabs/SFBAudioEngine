@@ -134,6 +134,11 @@ NS_SWIFT_NAME(AudioFile) @interface SFBAudioFile : NSObject
 /// @return \c YES if successful, \c NO otherwise
 - (BOOL)writeMetadataReturningError:(NSError **)error NS_SWIFT_NAME(writeMetadata());
 
+/// Writes metadata
+/// @param error An optional pointer to an \c NSError object to receive error information
+/// @return \c YES if successful, \c NO otherwise
+- (BOOL)writeMetadataReturningError:(nullable NSDictionary *)options :(NSError **)error NS_SWIFT_NAME(writeMetadata(options:));
+
 @end
 
 #pragma mark - Error Information

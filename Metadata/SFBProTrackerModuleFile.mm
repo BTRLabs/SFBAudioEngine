@@ -86,6 +86,11 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameProTrackerModule = @"org.sboo
 
 - (BOOL)writeMetadataReturningError:(NSError **)error
 {
+    return [self writeMetadataReturningError:nil :error];
+}
+
+- (BOOL)writeMetadataReturningError:(nullable NSDictionary *)options :(NSError **)error
+{
 	os_log_error(gSFBAudioFileLog, "Writing ProTracker module metadata is not supported");
 
 	if(error)

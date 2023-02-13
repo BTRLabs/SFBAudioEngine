@@ -63,6 +63,11 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameShorten = @"org.sbooth.AudioE
 
 - (BOOL)writeMetadataReturningError:(NSError **)error
 {
+    return [self writeMetadataReturningError:nil :error];
+}
+
+- (BOOL)writeMetadataReturningError:(nullable NSDictionary *)options :(NSError **)error
+{
 	os_log_error(gSFBAudioFileLog, "Writing Shorten metadata is not supported");
 
 	if(error)

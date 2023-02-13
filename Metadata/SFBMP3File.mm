@@ -126,41 +126,48 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameMP3 = @"org.sbooth.AudioEngin
 
 - (BOOL)writeMetadataReturningError:(NSError **)error
 {
-	TagLib::FileStream stream(self.url.fileSystemRepresentation);
-	if(!stream.isOpen()) {
-		if(error)
-			*error = [NSError SFB_errorWithDomain:SFBAudioFileErrorDomain
-											 code:SFBAudioFileErrorCodeInputOutput
-					descriptionFormatStringForURL:NSLocalizedString(@"The file “%@” could not be opened for writing.", @"")
-											  url:self.url
-									failureReason:NSLocalizedString(@"Input/output error", @"")
-							   recoverySuggestion:NSLocalizedString(@"The file may have been renamed, moved, deleted, or you may not have appropriate permissions.", @"")];
-		return NO;
-	}
+    return [self writeMetadataReturningError:nil :error];
+}
 
-	TagLib::MPEG::File file(&stream, TagLib::ID3v2::FrameFactory::instance(), false);
-	if(!file.isValid()) {
-		if(error)
-			*error = [NSError SFB_errorWithDomain:SFBAudioFileErrorDomain
-											 code:SFBAudioFileErrorCodeInvalidFormat
-					descriptionFormatStringForURL:NSLocalizedString(@"The file “%@” is not a valid MPEG file.", @"")
-											  url:self.url
-									failureReason:NSLocalizedString(@"Not an MPEG file", @"")
-							   recoverySuggestion:NSLocalizedString(@"The file's extension may not match the file's type.", @"")];
-		return NO;
-	}
-
-	// APE and ID3v1 tags are only written if present, but ID3v2 tags are always written
-
-	if(file.hasAPETag())
-		SFB::Audio::SetAPETagFromMetadata(self.metadata, file.APETag());
-
-	if(file.hasID3v1Tag())
-		SFB::Audio::SetID3v1TagFromMetadata(self.metadata, file.ID3v1Tag());
-
-	SFB::Audio::SetID3v2TagFromMetadata(self.metadata, file.ID3v2Tag(true));
-
-    if(!file.save(TagLib::MPEG::File::AllTags, true, 3)) {
+- (BOOL)writeMetadataReturningError:(nullable NSDictionary *)options :(NSError **)error
+{
+    TagLib::FileStream stream(self.url.fileSystemRepresentation);
+    if(!stream.isOpen()) {
+        if(error)
+            *error = [NSError SFB_errorWithDomain:SFBAudioFileErrorDomain
+                                             code:SFBAudioFileErrorCodeInputOutput
+                    descriptionFormatStringForURL:NSLocalizedString(@"The file “%@” could not be opened for writing.", @"")
+                                              url:self.url
+                                    failureReason:NSLocalizedString(@"Input/output error", @"")
+                               recoverySuggestion:NSLocalizedString(@"The file may have been renamed, moved, deleted, or you may not have appropriate permissions.", @"")];
+        return NO;
+    }
+    
+    TagLib::MPEG::File file(&stream, TagLib::ID3v2::FrameFactory::instance(), false);
+    if(!file.isValid()) {
+        if(error)
+            *error = [NSError SFB_errorWithDomain:SFBAudioFileErrorDomain
+                                             code:SFBAudioFileErrorCodeInvalidFormat
+                    descriptionFormatStringForURL:NSLocalizedString(@"The file “%@” is not a valid MPEG file.", @"")
+                                              url:self.url
+                                    failureReason:NSLocalizedString(@"Not an MPEG file", @"")
+                               recoverySuggestion:NSLocalizedString(@"The file's extension may not match the file's type.", @"")];
+        return NO;
+    }
+    
+    // APE and ID3v1 tags are only written if present, but ID3v2 tags are always written
+    
+    if(file.hasAPETag())
+        SFB::Audio::SetAPETagFromMetadata(self.metadata, file.APETag());
+    
+    if(file.hasID3v1Tag())
+        SFB::Audio::SetID3v1TagFromMetadata(self.metadata, file.ID3v1Tag());
+    
+    SFB::Audio::SetID3v2TagFromMetadata(self.metadata, file.ID3v2Tag(true));
+    
+    int id3v2Version = ([[options valueForKey:@"ID3V2VERSION"] intValue] == 3) ? 3 : 4;
+   
+    if(!file.save(TagLib::MPEG::File::AllTags, true, id3v2Version)) {
 		if(error)
 			*error = [NSError SFB_errorWithDomain:SFBAudioFileErrorDomain
 											 code:SFBAudioFileErrorCodeInputOutput

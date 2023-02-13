@@ -86,6 +86,11 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameScreamTracker3Module = @"org.
 
 - (BOOL)writeMetadataReturningError:(NSError **)error
 {
+    return [self writeMetadataReturningError:nil :error];
+}
+
+- (BOOL)writeMetadataReturningError:(nullable NSDictionary *)options :(NSError **)error
+{
 	os_log_error(gSFBAudioFileLog, "Writing Scream Tracker 3 module metadata is not supported");
 
 	if(error)

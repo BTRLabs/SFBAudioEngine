@@ -82,6 +82,11 @@ SFBAudioFileFormatName const SFBAudioFileFormatNameExtendedModule = @"org.sbooth
 
 - (BOOL)writeMetadataReturningError:(NSError **)error
 {
+    return [self writeMetadataReturningError:nil :error];
+}
+
+- (BOOL)writeMetadataReturningError:(nullable NSDictionary *)options :(NSError **)error
+{
 	os_log_error(gSFBAudioFileLog, "Writing extended module metadata is not supported");
 
 	if(error)
