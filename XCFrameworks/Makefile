@@ -17,6 +17,9 @@ XCFRAMEWORKS := \
 all: $(XCFRAMEWORKS)
 .phony: all
 
+exportloc:
+	@echo SKIPPING...
+
 install:
 .phony: install
 
