@@ -91,7 +91,7 @@
             }
 			else if([key caseInsensitiveCompare:@"TOTALDISCS"] == NSOrderedSame || [key caseInsensitiveCompare:@"DISCTOTAL"] == NSOrderedSame)
 				self.discTotal = @(value.integerValue);
-			else if([key caseInsensitiveCompare:@"LYRICS"] == NSOrderedSame)
+			else if([key caseInsensitiveCompare:@"LYRICS"] == NSOrderedSame || [key caseInsensitiveCompare:@"UNSYNCED LYRICS"] == NSOrderedSame || [key caseInsensitiveCompare:@"UNSYNCEDLYRICS"] == NSOrderedSame)
 				self.lyrics = value;
 			else if([key caseInsensitiveCompare:@"BPM"] == NSOrderedSame)
 				self.bpm = @(value.integerValue);
@@ -220,6 +220,8 @@ void SFB::Audio::SetAPETagFromMetadata(SFBAudioMetadata *metadata, TagLib::APE::
     tag->removeItem("DISCNUMBER");
     tag->removeItem("DISCTOTAL");
     tag->removeItem("ALBUMTITLESORT");
+    tag->removeItem("UNSYNCEDLYRICS");
+    tag->removeItem("UNSYNCED LYRICS");
 
 	// Standard tags
 	SetAPETag(tag, "ALBUM", metadata.albumTitle);
@@ -229,6 +231,7 @@ void SFB::Audio::SetAPETagFromMetadata(SFBAudioMetadata *metadata, TagLib::APE::
 	SetAPETag(tag, "GENRE", metadata.genre);
 	SetAPETag(tag, "YEAR", metadata.releaseDate);
 	SetAPETag(tag, "COMMENT", metadata.comment);
+    SetAPETag(tag, "LYRICS", metadata.lyrics);
 	SetAPETag(tag, "TITLE", metadata.title);
 	SetAPETagNumber(tag, "TRACK", metadata.trackNumber);
 	SetAPETagNumber(tag, "TOTALTRACKS", metadata.trackTotal);

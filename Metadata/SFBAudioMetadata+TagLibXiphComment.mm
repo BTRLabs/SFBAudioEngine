@@ -90,7 +90,7 @@ TagLib::ByteVector EncodeBase64(const TagLib::ByteVector& input)
 			self.discNumber = @(value.integerValue);
 		else if([key caseInsensitiveCompare:@"DISCTOTAL"] == NSOrderedSame || [key caseInsensitiveCompare:@"TOTALDISCS"] == NSOrderedSame)
 			self.discTotal = @(value.integerValue);
-		else if([key caseInsensitiveCompare:@"LYRICS"] == NSOrderedSame)
+		else if([key caseInsensitiveCompare:@"LYRICS"] == NSOrderedSame || [key caseInsensitiveCompare:@"UNSYNCED LYRICS"] == NSOrderedSame || [key caseInsensitiveCompare:@"UNSYNCEDLYRICS"] == NSOrderedSame)
 			self.lyrics = value;
 		else if([key caseInsensitiveCompare:@"BPM"] == NSOrderedSame)
 			self.bpm = @(value.integerValue);
@@ -211,6 +211,8 @@ void SFB::Audio::SetXiphCommentFromMetadata(SFBAudioMetadata *metadata, TagLib::
     tag->removeFields("ALBUMTITLESORT");
     tag->removeFields("TOTALTRACKS");
     tag->removeFields("TOTALDISCS");
+    tag->removeFields("UNSYNCEDLYRICS");
+    tag->removeFields("UNSYNCED LYRICS");
 
 	// Standard tags
 	SetXiphComment(tag, "ALBUM", metadata.albumTitle);
