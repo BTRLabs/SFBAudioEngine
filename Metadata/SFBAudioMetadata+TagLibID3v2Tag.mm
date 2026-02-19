@@ -143,6 +143,14 @@
 	if(!frameList.isEmpty())
 		self.isrc = [NSString stringWithUTF8String:frameList.front()->toString().toCString(true)];
 
+	// iTunes Advisory (Explicit)
+	auto iTunesAdvisoryFrame = TagLib::ID3v2::UserTextIdentificationFrame::find(const_cast<TagLib::ID3v2::Tag *>(tag), "ITUNESADVISORY");
+	if(iTunesAdvisoryFrame) {
+		NSMutableDictionary *additional = [NSMutableDictionary dictionaryWithDictionary:(self.additionalMetadata ?: @{})];
+		additional[@"ITUNESADVISORY"] = [NSString stringWithUTF8String:iTunesAdvisoryFrame->fieldList().back().toCString(true)];
+		self.additionalMetadata = additional;
+	}
+
 	// MusicBrainz
 	auto musicBrainzReleaseIDFrame = TagLib::ID3v2::UserTextIdentificationFrame::find(const_cast<TagLib::ID3v2::Tag *>(tag), "MusicBrainz Album Id");
 	if(musicBrainzReleaseIDFrame)
@@ -423,6 +431,21 @@ void SFB::Audio::SetID3v2TagFromMetadata(SFBAudioMetadata *metadata, TagLib::ID3
 	if(metadata.compilation != nil) {
 		auto frame = new TagLib::ID3v2::TextIdentificationFrame("TCMP", TagLib::String::Latin1);
 		frame->setText(metadata.compilation.boolValue ? "1" : "0");
+		tag->addFrame(frame);
+	}
+
+	// iTunes Advisory (Explicit)
+	// iTunes uses a TXXX frame with description "ITUNESADVISORY" (0=None, 1=Explicit, 2=Clean)
+	auto iTunesAdvisoryFrame = TagLib::ID3v2::UserTextIdentificationFrame::find(tag, "ITUNESADVISORY");
+	if(nullptr != iTunesAdvisoryFrame)
+		tag->removeFrame(iTunesAdvisoryFrame);
+
+	NSDictionary *additionalMetadata = metadata.additionalMetadata;
+	NSString *advisoryValue = additionalMetadata[@"ITUNESADVISORY"];
+	if(advisoryValue) {
+		auto frame = new TagLib::ID3v2::UserTextIdentificationFrame();
+		frame->setDescription("ITUNESADVISORY");
+		frame->setText(TagLib::StringFromNSString(advisoryValue));
 		tag->addFrame(frame);
 	}
 
