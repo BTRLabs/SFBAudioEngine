@@ -7,6 +7,7 @@
 #import <os/log.h>
 
 #import <algorithm>
+#import <cmath>
 #import <vector>
 
 #import <Accelerate/Accelerate.h>
@@ -22,6 +23,54 @@ namespace {
 
 const int kDSDPacketsPerPCMFrame = 8 / kSFBPCMFramesPerDSDPacket;
 const int kBufferSizePackets = 16384;
+
+/// Modified Bessel function of the first kind, order zero (power-series evaluation),
+/// used to compute Kaiser window coefficients for the decimation filter.
+double BesselI0(double x) noexcept
+{
+	double sum = 1;
+	double term = 1;
+	const double halfXSquared = x * x / 4;
+	for(int k = 1; k < 64; ++k) {
+		term *= halfXSquared / (k * k);
+		sum += term;
+		if(term < sum * 1e-21)
+			break;
+	}
+	return sum;
+}
+
+/// Designs the second-stage decimation low-pass for DSD128/DSD256 → PCM conversion.
+///
+/// The Gesemann DSD2PCM stage below is a fixed 8:1 decimator, so DSD128 and DSD256 leave
+/// it at 2× and 4× the DSD64 PCM rate. This Kaiser-windowed sinc FIR (≈130 dB stopband,
+/// cutoff at the final output Nyquist, unity DC gain) decimates that intermediate signal
+/// by `decimationFactor` (2 or 4) down to the same 352.8/384 kHz output rate as DSD64.
+std::vector<float> MakeDecimationFilter(int decimationFactor)
+{
+	// ~63-67 kHz transition band centered on cutoff at both supported factors
+	const int taps = decimationFactor == 2 ? 95 : 179;
+	const double beta = 13.37; // Kaiser β for ≈130 dB stopband attenuation
+	const double cutoff = 0.5 / decimationFactor; // output Nyquist, normalized to input rate
+	const double center = (taps - 1) / 2.;
+	const double i0Beta = BesselI0(beta);
+
+	std::vector<double> coefficients(static_cast<size_t>(taps));
+	double sum = 0;
+	for(int n = 0; n < taps; ++n) {
+		const double t = n - center;
+		const double sinc = t == 0 ? 2 * cutoff : std::sin(2 * M_PI * cutoff * t) / (M_PI * t);
+		const double u = t / center;
+		const double window = BesselI0(beta * std::sqrt(1 - u * u)) / i0Beta;
+		coefficients[static_cast<size_t>(n)] = sinc * window;
+		sum += coefficients[static_cast<size_t>(n)];
+	}
+
+	std::vector<float> result(static_cast<size_t>(taps));
+	for(int n = 0; n < taps; ++n)
+		result[static_cast<size_t>(n)] = static_cast<float>(coefficients[static_cast<size_t>(n)] / sum);
+	return result;
+}
 
 // Bit reversal lookup table from http://graphics.stanford.edu/~seander/bithacks.html#BitReverseTable
 static const uint8_t sBitReverseTable256 [256] =
@@ -313,6 +362,13 @@ private:
 	AVAudioCompressedBuffer *_buffer;
 	std::vector<DXD> _context;
 	float _linearGain;
+	// DSD128/DSD256 support: the DSD2PCM stage above is a fixed 8:1 decimator, so higher
+	// DSD rates are decimated a second time down to the DSD64 output rate (352.8/384 kHz).
+	int _decimationFactor;								// 1 = DSD64, 2 = DSD128, 4 = DSD256
+	std::vector<float> _decimationFilter;				// stage-2 FIR taps (empty when _decimationFactor == 1)
+	std::vector<std::vector<float>> _decimationInput;	// per-channel stage-1 samples awaiting decimation (FIR history + carry)
+	std::vector<float> _stage1Buffer;					// per-pass single-channel DSD2PCM scratch
+	AVAudioFramePosition _framePosition;				// PCM frames delivered (decoder packet position runs ahead of the stage-2 carry)
 }
 @end
 
@@ -349,6 +405,8 @@ private:
 		_decoder = decoder;
 		// 6 dBFS gain -> powf(10.f, 6.f / 20.f) -> 0x1.fec984p+0 (approximately 1.99526231496888)
 		_linearGain = 0x1.fec984p+0;
+		// The true factor (1, 2, or 4) is determined from the source sample rate in -openReturningError:
+		_decimationFactor = 1;
 	}
 	return self;
 }
@@ -387,27 +445,53 @@ private:
 		return NO;
 	}
 
-	if(asbd->mSampleRate != kSFBSampleRateDSD64) {
-		os_log_error(gSFBAudioDecoderLog, "Unsupported DSD sample rate for PCM conversion: %f", asbd->mSampleRate);
-		if(error)
-			*error = [NSError SFB_errorWithDomain:SFBDSDDecoderErrorDomain
-											 code:SFBDSDDecoderErrorCodeInvalidFormat
-					descriptionFormatStringForURL:NSLocalizedString(@"The file “%@” is not supported.", @"")
-											  url:_decoder.inputSource.url
-									failureReason:NSLocalizedString(@"Unsupported DSD sample rate", @"")
-							   recoverySuggestion:NSLocalizedString(@"The file's sample rate is not supported for DSD to PCM conversion.", @"")];
+	switch(static_cast<uint32_t>(asbd->mSampleRate)) {
+		case kSFBSampleRateDSD64:
+		case kSFBSampleRateDSD64Variant:
+			_decimationFactor = 1;
+			break;
+		case kSFBSampleRateDSD128:
+		case kSFBSampleRateDSD128Variant:
+			_decimationFactor = 2;
+			break;
+		case kSFBSampleRateDSD256:
+		case kSFBSampleRateDSD256Variant:
+			_decimationFactor = 4;
+			break;
+		default:
+			os_log_error(gSFBAudioDecoderLog, "Unsupported DSD sample rate for PCM conversion: %f", asbd->mSampleRate);
+			if(error)
+				*error = [NSError SFB_errorWithDomain:SFBDSDDecoderErrorDomain
+												 code:SFBDSDDecoderErrorCodeInvalidFormat
+						descriptionFormatStringForURL:NSLocalizedString(@"The file “%@” is not supported.", @"")
+												  url:_decoder.inputSource.url
+										failureReason:NSLocalizedString(@"Unsupported DSD sample rate", @"")
+								   recoverySuggestion:NSLocalizedString(@"The file's sample rate is not supported for DSD to PCM conversion.", @"")];
 
-		return NO;
+			return NO;
 	}
 
-	// Generate non-interleaved 32-bit float output
-	_processingFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32 sampleRate:(asbd->mSampleRate / (kSFBPCMFramesPerDSDPacket * kDSDPacketsPerPCMFrame)) interleaved:NO channelLayout:_decoder.processingFormat.channelLayout];
+	// Generate non-interleaved 32-bit float output at the DSD64 PCM rate regardless of the
+	// source DSD rate (DSD128/DSD256 are decimated a second time after the 8:1 DSD2PCM stage)
+	_processingFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32 sampleRate:(asbd->mSampleRate / (kSFBPCMFramesPerDSDPacket * kDSDPacketsPerPCMFrame * _decimationFactor)) interleaved:NO channelLayout:_decoder.processingFormat.channelLayout];
 
 	_buffer = [[AVAudioCompressedBuffer alloc] initWithFormat:_decoder.processingFormat packetCapacity:kBufferSizePackets maximumPacketSize:(kSFBBytesPerDSDPacketPerChannel * _decoder.processingFormat.channelCount)];
 	_buffer.packetCount = 0;
 
 	try {
 		_context.resize(asbd->mChannelsPerFrame);
+		if(_decimationFactor > 1) {
+			_decimationFilter = MakeDecimationFilter(_decimationFactor);
+			_stage1Buffer.resize(kBufferSizePackets);
+			_decimationInput.assign(asbd->mChannelsPerFrame, std::vector<float>(_decimationFilter.size() - 1, 0.f));
+			for(auto& channelInput : _decimationInput)
+				channelInput.reserve(_decimationFilter.size() - 1 + kBufferSizePackets);
+		}
+		else {
+			_decimationFilter.clear();
+			_stage1Buffer.clear();
+			_decimationInput.clear();
+		}
 	} catch(const std::exception& e) {
 		os_log_error(gSFBAudioDecoderLog, "Error resizing _context: %{public}s", e.what());
 		_buffer = nil;
@@ -416,6 +500,8 @@ private:
 		return NO;
 	}
 
+	_framePosition = 0;
+
 	return YES;
 }
 
@@ -423,6 +509,9 @@ private:
 {
 	_buffer = nil;
 	_context.clear();
+	_decimationFilter.clear();
+	_decimationInput.clear();
+	_stage1Buffer.clear();
 	return [_decoder closeReturningError:error];
 }
 
@@ -433,12 +522,14 @@ private:
 
 - (AVAudioFramePosition)framePosition
 {
-	return _decoder.packetPosition / kDSDPacketsPerPCMFrame;
+	// Not derived from _decoder.packetPosition: for DSD128/DSD256 the underlying decoder
+	// runs ahead of the frames actually delivered by up to a stage-2 FIR length of samples
+	return _framePosition;
 }
 
 - (AVAudioFramePosition)frameLength
 {
-	return _decoder.packetCount / kDSDPacketsPerPCMFrame;
+	return _decoder.packetCount / (kDSDPacketsPerPCMFrame * _decimationFactor);
 }
 
 - (BOOL)decodeIntoBuffer:(AVAudioBuffer *)buffer error:(NSError **)error {
@@ -463,20 +554,21 @@ private:
 
 	AVAudioFrameCount framesRead = 0;
 	const float linearGain = _linearGain;
+	const int decimationFactor = _decimationFactor;
+	const size_t filterLength = _decimationFilter.size();
 
 	for(;;) {
 		AVAudioFrameCount framesRemaining = frameLength - framesRead;
 
-		// Grab the DSD audio
-		AVAudioPacketCount dsdPacketsRemaining = framesRemaining * kDSDPacketsPerPCMFrame;
+		// Grab the DSD audio; one DSD packet is one stage-1 (8:1 DSD2PCM) frame, and one
+		// output PCM frame consumes `decimationFactor` of those
+		AVAudioPacketCount dsdPacketsRemaining = framesRemaining * static_cast<AVAudioPacketCount>(kDSDPacketsPerPCMFrame * decimationFactor);
 		if(![_decoder decodeIntoBuffer:_buffer packetCount:std::min(_buffer.packetCapacity, dsdPacketsRemaining) error:error])
 			return NO;
 
 		AVAudioPacketCount dsdPacketsDecoded = _buffer.packetCount;
-		if(dsdPacketsDecoded == 0)
+		if(dsdPacketsDecoded == 0 && (decimationFactor == 1 || self.frameLength <= _framePosition + framesRead))
 			break;
-
-		AVAudioFrameCount framesDecoded = dsdPacketsDecoded / kDSDPacketsPerPCMFrame;
 
 		// Convert to PCM
 		// NB: Currently DSDIFFDecoder and DSFDecoder only produce interleaved output
@@ -484,15 +576,59 @@ private:
 		float * const *floatChannelData = buffer.floatChannelData;
 		AVAudioChannelCount channelCount = buffer.format.channelCount;
 		bool isBigEndian = _buffer.format.streamDescription->mFormatFlags & kAudioFormatFlagIsBigEndian;
-		for(AVAudioChannelCount channel = 0; channel < channelCount; ++channel) {
-			const uint8_t *input = static_cast<const uint8_t *>(_buffer.data) + channel;
-			// Append after the frames already written this call; otherwise a request larger
-			// than kBufferSizePackets overwrites the start of the buffer on every pass,
-			// leaving everything past the first chunk silent
-			float *output = floatChannelData[channel] + buffer.frameLength;
-			_context[channel].Translate(framesDecoded, input, channelCount, !isBigEndian, output, 1);
-			// Boost signal by 6 dBFS
-			vDSP_vsmul(output, 1, &linearGain, output, 1, framesDecoded);
+		AVAudioFrameCount framesDecoded = 0;
+
+		if(decimationFactor == 1) {
+			framesDecoded = dsdPacketsDecoded / kDSDPacketsPerPCMFrame;
+			for(AVAudioChannelCount channel = 0; channel < channelCount; ++channel) {
+				const uint8_t *input = static_cast<const uint8_t *>(_buffer.data) + channel;
+				// Append after the frames already written this call; otherwise a request larger
+				// than kBufferSizePackets overwrites the start of the buffer on every pass,
+				// leaving everything past the first chunk silent
+				float *output = floatChannelData[channel] + buffer.frameLength;
+				_context[channel].Translate(framesDecoded, input, channelCount, !isBigEndian, output, 1);
+				// Boost signal by 6 dBFS
+				vDSP_vsmul(output, 1, &linearGain, output, 1, framesDecoded);
+			}
+		}
+		else {
+			// Stage 1: 8:1 DSD2PCM into the per-channel carry buffers
+			for(AVAudioChannelCount channel = 0; channel < channelCount; ++channel) {
+				const uint8_t *input = static_cast<const uint8_t *>(_buffer.data) + channel;
+				_context[channel].Translate(dsdPacketsDecoded, input, channelCount, !isBigEndian, _stage1Buffer.data(), 1);
+				_decimationInput[channel].insert(_decimationInput[channel].end(), _stage1Buffer.begin(), _stage1Buffer.begin() + dsdPacketsDecoded);
+			}
+
+			// At end of audio, zero-pad the carry so the frames still owed by the stage-2 FIR
+			// delay flush out and the delivered frame count matches self.frameLength exactly
+			AVAudioFramePosition framesOwed = std::max<AVAudioFramePosition>(self.frameLength - (_framePosition + framesRead), 0);
+			if(dsdPacketsDecoded == 0 && framesOwed > 0) {
+				size_t desiredFrames = std::min<size_t>(static_cast<size_t>(framesOwed), framesRemaining);
+				size_t requiredSamples = filterLength - 1 + desiredFrames * static_cast<size_t>(decimationFactor);
+				for(AVAudioChannelCount channel = 0; channel < channelCount; ++channel) {
+					if(_decimationInput[channel].size() < requiredSamples)
+						_decimationInput[channel].resize(requiredSamples, 0.f);
+				}
+			}
+
+			// Stage 2: FIR low-pass + decimation down to the output rate
+			size_t availableSamples = _decimationInput[0].size();
+			size_t framesAvailable = availableSamples >= filterLength ? (availableSamples - filterLength) / static_cast<size_t>(decimationFactor) + 1 : 0;
+			// The owed clamp keeps a file whose packet count is not a multiple of the
+			// decimation factor from delivering one frame past self.frameLength at EOF
+			framesDecoded = static_cast<AVAudioFrameCount>(std::min<size_t>({framesAvailable, framesRemaining, static_cast<size_t>(framesOwed)}));
+			if(framesDecoded > 0) {
+				size_t samplesConsumed = static_cast<size_t>(framesDecoded) * static_cast<size_t>(decimationFactor);
+				for(AVAudioChannelCount channel = 0; channel < channelCount; ++channel) {
+					float *output = floatChannelData[channel] + buffer.frameLength;
+					vDSP_desamp(_decimationInput[channel].data(), static_cast<vDSP_Stride>(decimationFactor), _decimationFilter.data(), output, framesDecoded, filterLength);
+					// Boost signal by 6 dBFS
+					vDSP_vsmul(output, 1, &linearGain, output, 1, framesDecoded);
+					_decimationInput[channel].erase(_decimationInput[channel].begin(), _decimationInput[channel].begin() + static_cast<ptrdiff_t>(samplesConsumed));
+				}
+			}
+			else if(dsdPacketsDecoded == 0)
+				break;
 		}
 
 		buffer.frameLength += framesDecoded;
@@ -503,6 +639,8 @@ private:
 		if(framesRead == frameLength)
 			break;
 	}
+
+	_framePosition += framesRead;
 
 	return YES;
 }
@@ -516,11 +654,17 @@ private:
 {
 	NSParameterAssert(frame >= 0);
 
-	if(![_decoder seekToPacket:(frame * kDSDPacketsPerPCMFrame) error:error])
+	if(![_decoder seekToPacket:(frame * kDSDPacketsPerPCMFrame * _decimationFactor) error:error])
 		return NO;
 
 	_buffer.packetCount = 0;
 	_buffer.byteLength = 0;
+
+	// Discard the stage-2 carry and re-prime the FIR history for the new stream position
+	for(auto& channelInput : _decimationInput)
+		channelInput.assign(_decimationFilter.size() - 1, 0.f);
+
+	_framePosition = frame;
 
 	return YES;
 }

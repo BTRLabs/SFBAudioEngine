@@ -9,7 +9,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// A wrapper around a DSD decoder supporting DSD64 to PCM conversion
+/// A wrapper around a DSD decoder supporting DSD64, DSD128, and DSD256 to PCM conversion
+/// (output is always at the DSD64 PCM rate: 352.8 kHz, or 384 kHz for the 48 kHz DSD family)
 NS_SWIFT_NAME(DSDPCMDecoder) @interface SFBDSDPCMDecoder : NSObject <SFBPCMDecoding>
 
 + (instancetype)new NS_UNAVAILABLE;
