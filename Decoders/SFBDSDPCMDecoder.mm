@@ -406,7 +406,15 @@ private:
 	_buffer = [[AVAudioCompressedBuffer alloc] initWithFormat:_decoder.processingFormat packetCapacity:kBufferSizePackets maximumPacketSize:(kSFBBytesPerDSDPacketPerChannel * _decoder.processingFormat.channelCount)];
 	_buffer.packetCount = 0;
 
-	_context.resize(asbd->mChannelsPerFrame);
+	try {
+		_context.resize(asbd->mChannelsPerFrame);
+	} catch(const std::exception& e) {
+		os_log_error(gSFBAudioDecoderLog, "Error resizing _context: %{public}s", e.what());
+		_buffer = nil;
+		if(error)
+			*error = [NSError errorWithDomain:NSPOSIXErrorDomain code:ENOMEM userInfo:nil];
+		return NO;
+	}
 
 	return YES;
 }
@@ -462,7 +470,7 @@ private:
 		// Grab the DSD audio
 		AVAudioPacketCount dsdPacketsRemaining = framesRemaining * kDSDPacketsPerPCMFrame;
 		if(![_decoder decodeIntoBuffer:_buffer packetCount:std::min(_buffer.packetCapacity, dsdPacketsRemaining) error:error])
-			break;
+			return NO;
 
 		AVAudioPacketCount dsdPacketsDecoded = _buffer.packetCount;
 		if(dsdPacketsDecoded == 0)

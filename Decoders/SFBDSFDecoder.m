@@ -152,7 +152,7 @@ static void MatrixTransposeNaive(const uint8_t * restrict A, uint8_t * restrict 
 		return NO;
 	}
 
-	if(![_inputSource readUInt64LittleEndian:&chunkSize error:nil]) {
+	if(![_inputSource readUInt64LittleEndian:&chunkSize error:nil] || chunkSize != 52) {
 		os_log_error(gSFBDSDDecoderLog, "Unexpected 'fmt ' chunk size: %llu", chunkSize);
 		if(error)
 			*error = CreateInvalidDSFFileError(_inputSource.url);
@@ -242,6 +242,7 @@ static void MatrixTransposeNaive(const uint8_t * restrict A, uint8_t * restrict 
 		return NO;
 	}
 
+	_packetPosition = 0;
 	_packetCount = sampleCount / kSFBPCMFramesPerDSDPacket;
 	NSInteger offset;
 	if(![_inputSource getOffset:&offset error:nil]) {
@@ -256,10 +257,10 @@ static void MatrixTransposeNaive(const uint8_t * restrict A, uint8_t * restrict 
 		case 1:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_Mono];			break;
 		case 2:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_Stereo];		break;
 		case 3:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_MPEG_3_0_A];	break;
-		case 4:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_Quadraphonic];	break;
-		case 5:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_ITU_2_2];		break;
-		case 6:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_MPEG_5_0_A];	break;
-		case 7:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_MPEG_5_1_A];	break;
+		case 4:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_WAVE_4_0_B];	break;
+		case 5:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_DVD_10];		break;
+		case 6:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_WAVE_5_0_B];	break;
+		case 7:		channelLayout = [AVAudioChannelLayout layoutWithLayoutTag:kAudioChannelLayoutTag_WAVE_5_1_B];	break;
 	}
 
 	AudioStreamBasicDescription processingStreamDescription = {0};
@@ -286,7 +287,7 @@ static void MatrixTransposeNaive(const uint8_t * restrict A, uint8_t * restrict 
 	sourceStreamDescription.mChannelsPerFrame	= (UInt32)channelNum;
 	sourceStreamDescription.mBitsPerChannel		= 1;
 
-	_sourceFormat = [[AVAudioFormat alloc] initWithStreamDescription:&sourceStreamDescription];
+	_sourceFormat = [[AVAudioFormat alloc] initWithStreamDescription:&sourceStreamDescription channelLayout:channelLayout];
 
 	// Metadata chunk is ignored
 
@@ -332,35 +333,37 @@ static void MatrixTransposeNaive(const uint8_t * restrict A, uint8_t * restrict 
 	if(packetCount == 0)
 		return YES;
 
+	AVAudioPacketCount packetsRemaining = (AVAudioPacketCount)(_packetCount - _packetPosition);
+	AVAudioPacketCount packetsToRead = MIN(packetCount, packetsRemaining);
 	AVAudioPacketCount packetsProcessed = 0;
 
 	uint32_t packetSize = kSFBBytesPerDSDPacketPerChannel * _processingFormat.channelCount;
 
 	for(;;) {
-		AVAudioPacketCount packetsRemaining = packetCount - packetsProcessed;
-		AVAudioPacketCount packetsToSkip = buffer.packetCount;
 		AVAudioPacketCount packetsInBuffer = _buffer.packetCount;
-		AVAudioPacketCount packetsToCopy = MIN(packetsInBuffer, packetsRemaining);
+		AVAudioPacketCount packetsToCopy = MIN(packetsInBuffer, packetsToRead - packetsProcessed);
 
 		// Copy data from the internal buffer to output
-		uint32_t copySize = packetsToCopy * packetSize;
-		memcpy((uint8_t *)buffer.data + (packetsToSkip * packetSize), _buffer.data, copySize);
-		buffer.packetCount += packetsToCopy;
-		buffer.byteLength += copySize;
+		if(packetsToCopy) {
+			uint32_t copySize = packetsToCopy * packetSize;
+			memcpy((uint8_t *)buffer.data + (buffer.packetCount * packetSize), _buffer.data, copySize);
+			buffer.packetCount += packetsToCopy;
+			buffer.byteLength += copySize;
 
-		// Move remaining data in buffer to beginning
-		if(packetsToCopy != packetsInBuffer) {
-			uint8_t *dst = (uint8_t *)_buffer.data;
-			memmove(dst, dst + copySize, (packetsInBuffer - packetsToCopy) * packetSize);
+			// Move remaining data in buffer to beginning
+			if(packetsToCopy != packetsInBuffer) {
+				uint8_t *dst = (uint8_t *)_buffer.data;
+				memmove(dst, dst + copySize, (packetsInBuffer - packetsToCopy) * packetSize);
+			}
+
+			_buffer.packetCount -= packetsToCopy;
+			_buffer.byteLength -= copySize;
+
+			packetsProcessed += packetsToCopy;
 		}
 
-		_buffer.packetCount -= packetsToCopy;
-		_buffer.byteLength -= copySize;
-
-		packetsProcessed += packetsToCopy;
-
 		// All requested packets were read
-		if(packetsProcessed == packetCount)
+		if(packetsProcessed == packetsToRead)
 			break;
 
 		// Read  the next block
@@ -426,8 +429,15 @@ static void MatrixTransposeNaive(const uint8_t * restrict A, uint8_t * restrict 
 	uint32_t bufsize = _buffer.byteCapacity;
 
 	NSInteger bytesRead;
-	if(![_inputSource readBytes:buf length:bufsize bytesRead:&bytesRead error:error] || bytesRead != bufsize) {
-		os_log_debug(gSFBDSDDecoderLog, "Error reading audio block: requested %u bytes, got %ld", bufsize, bytesRead);
+	if(![_inputSource readBytes:buf length:bufsize bytesRead:&bytesRead error:error]) {
+		os_log_error(gSFBDSDDecoderLog, "Error reading audio block");
+		return NO;
+	}
+
+	if(bytesRead != bufsize) {
+		os_log_error(gSFBDSDDecoderLog, "Missing data in audio block: requested %u bytes, got %ld", bufsize, (long)bytesRead);
+		if(error)
+			*error = CreateInvalidDSFFileError(_inputSource.url);
 		return NO;
 	}
 

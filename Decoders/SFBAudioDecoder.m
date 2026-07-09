@@ -248,6 +248,8 @@ static NSMutableArray *_registeredSubclasses = nil;
 
 - (BOOL)closeReturningError:(NSError **)error
 {
+	_sourceFormat = nil;
+	_processingFormat = nil;
 	if(_inputSource.isOpen)
 		return [_inputSource closeReturningError:error];
 	return YES;

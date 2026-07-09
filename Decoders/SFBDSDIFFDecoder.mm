@@ -472,12 +472,17 @@ std::shared_ptr<PropertyChunk> ParsePropertyChunk(SFBInputSource *inputSource, c
 
 	// Parse the local chunks
 	auto chunkDataSizeRemaining = result->mDataSize - 4; // adjust for mPropertyType
-	while(chunkDataSizeRemaining) {
+	while(chunkDataSizeRemaining >= 12) {
 
 		uint32_t localChunkID;
 		uint64_t localChunkDataSize;
 
 		if(ReadChunkIDAndDataSize(inputSource, localChunkID, localChunkDataSize)) {
+			if(localChunkDataSize > chunkDataSizeRemaining - 12) {
+				os_log_error(gSFBDSDDecoderLog, "Invalid data size for local chunk '%{public}.4s' in 'PROP' chunk", SFBCStringForOSType(localChunkID));
+				return nullptr;
+			}
+
 			switch(localChunkID) {
 				case 'FS  ':
 				{
@@ -603,12 +608,17 @@ std::unique_ptr<FormDSDChunk> ParseFormDSDChunk(SFBInputSource *inputSource, con
 
 	// Parse the local chunks
 	auto chunkDataSizeRemaining = result->mDataSize - 4; // adjust for mFormType
-	while(chunkDataSizeRemaining) {
+	while(chunkDataSizeRemaining >= 12) {
 
 		uint32_t localChunkID;
 		uint64_t localChunkDataSize;
 
 		if(ReadChunkIDAndDataSize(inputSource, localChunkID, localChunkDataSize)) {
+			if(localChunkDataSize > chunkDataSizeRemaining - 12) {
+				os_log_error(gSFBDSDDecoderLog, "Invalid data size for local chunk '%{public}.4s' in 'FRM8' chunk", SFBCStringForOSType(localChunkID));
+				return nullptr;
+			}
+
 			switch(localChunkID) {
 				case 'FVER':
 				{
@@ -690,7 +700,6 @@ static NSError * CreateInvalidDSDIFFFileError(NSURL * url)
 	AVAudioFramePosition _packetPosition;
 	AVAudioFramePosition _packetCount;
 	int64_t _audioOffset;
-	AVAudioCompressedBuffer *_buffer;
 }
 @end
 
@@ -784,7 +793,7 @@ static NSError * CreateInvalidDSDIFFFileError(NSURL * url)
 	sourceStreamDescription.mChannelsPerFrame	= channelsChunk->mNumberChannels;
 	sourceStreamDescription.mBitsPerChannel		= 1;
 
-	_sourceFormat = [[AVAudioFormat alloc] initWithStreamDescription:&sourceStreamDescription];
+	_sourceFormat = [[AVAudioFormat alloc] initWithStreamDescription:&sourceStreamDescription channelLayout:channelLayout];
 
 	auto soundDataChunk = std::static_pointer_cast<DSDSoundDataChunk>(chunks->mLocalChunks['DSD ']);
 	if(!soundDataChunk) {
@@ -795,6 +804,7 @@ static NSError * CreateInvalidDSDIFFFileError(NSURL * url)
 	}
 
 	_audioOffset = soundDataChunk->mDataOffset;
+	_packetPosition = 0;
 	_packetCount = (AVAudioFramePosition)(soundDataChunk->mDataSize - 12) / (kSFBBytesPerDSDPacketPerChannel * channelsChunk->mNumberChannels);
 
 	if(![_inputSource seekToOffset:_audioOffset error:error])
@@ -855,9 +865,16 @@ static NSError * CreateInvalidDSDIFFFileError(NSURL * url)
 		NSInteger bytesToRead = std::min(packetsToRead * packetSize, buffer.byteCapacity - buffer.byteLength);
 
 		NSInteger bytesRead;
-		if(![_inputSource readBytes:buf length:bytesToRead bytesRead:&bytesRead error:error] || bytesRead != bytesToRead) {
-			os_log_debug(gSFBDSDDecoderLog, "Error reading audio: requested %ld bytes, got %ld", static_cast<long>(bytesToRead), bytesRead);
-			break;
+		if(![_inputSource readBytes:buf length:bytesToRead bytesRead:&bytesRead error:error]) {
+			os_log_error(gSFBDSDDecoderLog, "Error reading audio data");
+			return NO;
+		}
+
+		if(bytesRead != bytesToRead) {
+			os_log_error(gSFBDSDDecoderLog, "Missing audio data: requested %ld bytes, got %ld", static_cast<long>(bytesToRead), bytesRead);
+			if(error)
+				*error = CreateInvalidDSDIFFFileError(_inputSource.url);
+			return NO;
 		}
 
 		// Decoding is finished
