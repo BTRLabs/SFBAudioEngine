@@ -42,6 +42,7 @@ enum eAudioPlayerNodeFlags : unsigned int {
 	eAudioPlayerNodeFlagMuteRequested				= 1u << 2,
 	eAudioPlayerNodeFlagRingBufferNeedsReset		= 1u << 3,
 	eAudioPlayerNodeFlagStopDecoderThread			= 1u << 4,
+	eAudioPlayerNodeFlagOutputsDoPSilence			= 1u << 5,
 };
 
 enum eAudioPlayerNodeRenderEventRingBufferCommands : uint32_t {
@@ -67,6 +68,41 @@ const AVAudioFrameCount 	kRingBufferFrameCapacity 	= 16384;
 const AVAudioFrameCount 	kRingBufferChunkSize 		= 2048;
 const size_t 				kDecoderStateArraySize		= 8;
 const int64_t				kInvalidFramePosition 		= -1;
+
+#pragma mark - DoP Silence
+
+// A DoP frame carrying DSD silence, as the exact float32 representation of the packed 24-bit
+// sample produced by SFBDoPDecoder: the DoP marker byte in the MSB over two bytes of the DSD
+// silence pattern 0x69. 0x056969 = 354665 and 0xFA6969 sign-extends to -366231; both are
+// divided by 0x800000 to match the canonical int24 ↔ float32 conversion, so these values
+// survive the float render chain bit-perfectly.
+const float kDoPSilenceMarker05 = 354665.f / 8388608.f;
+const float kDoPSilenceMarkerFA = -366231.f / 8388608.f;
+
+/// Returns the DoP marker byte of frame \c frame in the deinterleaved float32 \c bufferList
+uint8_t DoPMarkerForFrame(const AudioBufferList *bufferList, AVAudioFrameCount frame) noexcept
+{
+	const float sample = static_cast<const float *>(bufferList->mBuffers[0].mData)[frame];
+	const auto value = static_cast<int32_t>(std::lrintf(sample * 8388608.f));
+	return static_cast<uint8_t>((static_cast<uint32_t>(value) >> 16) & 0xff);
+}
+
+/// Fills frames <tt>[frameOffset, frameOffset + frameCount)</tt> of every buffer in \c bufferList
+/// with DoP silence, starting with the \c 0x05 marker if \c startWith05 is \c true and alternating
+/// markers per frame (the same marker across all channels of a frame, per the DoP standard).
+/// Returns \c true if the frame following the fill should carry the \c 0x05 marker.
+bool FillWithDoPSilence(AudioBufferList *bufferList, AVAudioFrameCount frameOffset, AVAudioFrameCount frameCount, bool startWith05) noexcept
+{
+	for(UInt32 i = 0; i < bufferList->mNumberBuffers; ++i) {
+		float * const buffer = static_cast<float *>(bufferList->mBuffers[i].mData) + frameOffset;
+		bool marker05 = startWith05;
+		for(AVAudioFrameCount frame = 0; frame < frameCount; ++frame) {
+			buffer[frame] = marker05 ? kDoPSilenceMarker05 : kDoPSilenceMarkerFA;
+			marker05 = !marker05;
+		}
+	}
+	return (frameCount % 2) == 0 ? startWith05 : !startWith05;
+}
 
 #pragma mark - Decoder State
 
@@ -337,6 +373,9 @@ inline double ConvertHostTicksToNanos(uint64_t t) noexcept
 	SFB::AudioRingBuffer			_audioRingBuffer;
 	SFB::RingBuffer					_renderEventsRingBuffer;
 	DecoderStateData::atomic_ptr 	_decoderStateArray [kDecoderStateArraySize];
+
+	/// DoP marker parity for the next DoP silence frame; accessed only from the render thread
+	bool							_dopNextMarkerIs05;
 }
 - (BOOL)performEnqueue:(id <SFBPCMDecoding>)decoder reset:(BOOL)reset error:(NSError **)error;
 @end
@@ -387,6 +426,18 @@ inline double ConvertHostTicksToNanos(uint64_t t) noexcept
 		// 2. Output silence if a) the node isn't playing, b) the node is muted, or c) the ring buffer is empty
 		if(!(self->_flags.load() & eAudioPlayerNodeFlagIsPlaying) || self->_flags.load() & eAudioPlayerNodeFlagOutputIsMuted || framesAvailableToRead == 0) {
 			size_t byteCountToZero = self->_audioRingBuffer.Format().FrameCountToByteSize(frameCount);
+
+			// When rendering DoP, silence must be DoP-encoded DSD silence; PCM zeros break the
+			// marker stream and knock the DAC out of DSD mode mid-bitstream with an audible pop
+			if(self->_flags.load() & eAudioPlayerNodeFlagOutputsDoPSilence) {
+				self->_dopNextMarkerIs05 = FillWithDoPSilence(outputData, 0, frameCount, self->_dopNextMarkerIs05);
+				for(UInt32 i = 0; i < outputData->mNumberBuffers; ++i)
+					outputData->mBuffers[i].mDataByteSize = static_cast<UInt32>(byteCountToZero);
+
+				// Deliberately not marked as silence; downstream would substitute zeros
+				return noErr;
+			}
+
 			for(UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
 				std::memset(outputData->mBuffers[i].mData, 0, byteCountToZero);
 				outputData->mBuffers[i].mDataByteSize = static_cast<UInt32>(byteCountToZero);
@@ -411,9 +462,24 @@ inline double ConvertHostTicksToNanos(uint64_t t) noexcept
 			auto framesOfSilence = frameCount - framesRead;
 			auto byteCountToSkip = self->_audioRingBuffer.Format().FrameCountToByteSize(framesRead);
 			auto byteCountToZero = self->_audioRingBuffer.Format().FrameCountToByteSize(framesOfSilence);
-			for(UInt32 i = 0; i < outputData->mNumberBuffers; ++i)
-				std::memset(static_cast<int8_t *>(outputData->mBuffers[i].mData) + byteCountToSkip, 0, byteCountToZero);
+
+			// When rendering DoP the pad must be DoP-encoded DSD silence continuing the marker
+			// alternation of the final rendered frame, not PCM zeros (see step 2)
+			if(self->_flags.load() & eAudioPlayerNodeFlagOutputsDoPSilence) {
+				bool startWith05 = framesRead > 0 ? DoPMarkerForFrame(outputData, framesRead - 1) != 0x05 : self->_dopNextMarkerIs05;
+				FillWithDoPSilence(outputData, framesRead, framesOfSilence, startWith05);
+				for(UInt32 i = 0; i < outputData->mNumberBuffers; ++i)
+					outputData->mBuffers[i].mDataByteSize = static_cast<UInt32>(byteCountToSkip + byteCountToZero);
+			}
+			else
+				for(UInt32 i = 0; i < outputData->mNumberBuffers; ++i)
+					std::memset(static_cast<int8_t *>(outputData->mBuffers[i].mData) + byteCountToSkip, 0, byteCountToZero);
 		}
+
+		// Track the marker parity following the final frame in the buffer (rendered data or DoP
+		// silence pad) so a subsequent all-silence render cycle continues the alternation
+		if(self->_flags.load() & eAudioPlayerNodeFlagOutputsDoPSilence && frameCount > 0)
+			self->_dopNextMarkerIs05 = DoPMarkerForFrame(outputData, frameCount - 1) != 0x05;
 
 		// ========================================
 		// 5. If there is adequate space in the ring buffer for another chunk signal the decoding thread
@@ -512,6 +578,9 @@ inline double ConvertHostTicksToNanos(uint64_t t) noexcept
 		// Initialize the decoder array
 		for(size_t i = 0; i < kDecoderStateArraySize; ++i)
 			_decoderStateArray[i].store(nullptr);
+
+		// SFBDoPDecoder emits 0x05 as the first DoP marker
+		_dopNextMarkerIs05 = true;
 
 		// Allocate the audio ring buffer and the rendering events ring buffer
 		_renderingFormat = format;
@@ -826,6 +895,19 @@ inline double ConvertHostTicksToNanos(uint64_t t) noexcept
 - (void)togglePlayPause
 {
 	_flags.fetch_xor(eAudioPlayerNodeFlagIsPlaying);
+}
+
+- (BOOL)outputsDoPSilence
+{
+	return (_flags.load() & eAudioPlayerNodeFlagOutputsDoPSilence) != 0;
+}
+
+- (void)setOutputsDoPSilence:(BOOL)outputsDoPSilence
+{
+	if(outputsDoPSilence)
+		_flags.fetch_or(eAudioPlayerNodeFlagOutputsDoPSilence);
+	else
+		_flags.fetch_and(~eAudioPlayerNodeFlagOutputsDoPSilence);
 }
 
 #pragma mark - Player State

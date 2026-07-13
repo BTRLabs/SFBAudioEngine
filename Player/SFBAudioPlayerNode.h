@@ -150,6 +150,19 @@ NS_SWIFT_NAME(AudioPlayerNode) @interface SFBAudioPlayerNode : AVAudioSourceNode
 /// Toggles the playback state
 - (void)togglePlayPause;
 
+/// When \c YES the render block outputs DoP-encoded DSD silence instead of PCM zeros whenever it
+/// has no audio to render (not playing, muted, or the ring buffer is empty) and when padding a
+/// partial final buffer.
+///
+/// A DAC playing DoP interprets PCM zeros as loss of the DoP marker stream and drops out of DSD
+/// mode mid-bitstream, producing an audible pop on pause, seek, and at the end of audio. DoP
+/// silence frames (alternating \c 0x05 / \c 0xFA markers over the DSD silence byte \c 0x69) keep
+/// the DAC locked in DSD mode and are rendered as true silence.
+///
+/// Only enable this when the enqueued audio is DoP; on a non-DoP output these frames are audible
+/// as low-level noise.
+@property (nonatomic) BOOL outputsDoPSilence;
+
 #pragma mark - State
 
  /// Returns \c YES if the \c SFBAudioPlayerNode is playing
