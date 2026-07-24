@@ -40,16 +40,23 @@ double BesselI0(double x) noexcept
 	return sum;
 }
 
-/// Designs the second-stage decimation low-pass for DSD128/DSD256 → PCM conversion.
+/// Designs the second-stage decimation low-pass for DSD128/256/512/1024 → PCM conversion.
 ///
-/// The Gesemann DSD2PCM stage below is a fixed 8:1 decimator, so DSD128 and DSD256 leave
-/// it at 2× and 4× the DSD64 PCM rate. This Kaiser-windowed sinc FIR (≈130 dB stopband,
+/// The Gesemann DSD2PCM stage below is a fixed 8:1 decimator, so DSD128 through DSD1024
+/// leave it at 2×–16× the DSD64 PCM rate. This Kaiser-windowed sinc FIR (≈130 dB stopband,
 /// cutoff at the final output Nyquist, unity DC gain) decimates that intermediate signal
-/// by `decimationFactor` (2 or 4) down to the same 352.8/384 kHz output rate as DSD64.
+/// by `decimationFactor` (2, 4, 8, or 16) down to the same 352.8/384 kHz output rate as DSD64.
 std::vector<float> MakeDecimationFilter(int decimationFactor)
 {
-	// ~63-67 kHz transition band centered on cutoff at both supported factors
-	const int taps = decimationFactor == 2 ? 95 : 179;
+	// ~63-67 kHz transition band centered on cutoff at every supported factor: the
+	// intermediate rate doubles with the factor, so the tap count doubles with it too
+	int taps;
+	switch(decimationFactor) {
+		case 2: 	taps = 95; 		break;
+		case 4: 	taps = 179; 	break;
+		case 8: 	taps = 359; 	break;
+		default: 	taps = 717; 	break;
+	}
 	const double beta = 13.37; // Kaiser β for ≈130 dB stopband attenuation
 	const double cutoff = 0.5 / decimationFactor; // output Nyquist, normalized to input rate
 	const double center = (taps - 1) / 2.;
@@ -362,9 +369,9 @@ private:
 	AVAudioCompressedBuffer *_buffer;
 	std::vector<DXD> _context;
 	float _linearGain;
-	// DSD128/DSD256 support: the DSD2PCM stage above is a fixed 8:1 decimator, so higher
+	// DSD128–DSD1024 support: the DSD2PCM stage above is a fixed 8:1 decimator, so higher
 	// DSD rates are decimated a second time down to the DSD64 output rate (352.8/384 kHz).
-	int _decimationFactor;								// 1 = DSD64, 2 = DSD128, 4 = DSD256
+	int _decimationFactor;								// 1 = DSD64, 2 = DSD128, 4 = DSD256, 8 = DSD512, 16 = DSD1024
 	std::vector<float> _decimationFilter;				// stage-2 FIR taps (empty when _decimationFactor == 1)
 	std::vector<std::vector<float>> _decimationInput;	// per-channel stage-1 samples awaiting decimation (FIR history + carry)
 	std::vector<float> _stage1Buffer;					// per-pass single-channel DSD2PCM scratch
@@ -405,7 +412,7 @@ private:
 		_decoder = decoder;
 		// 6 dBFS gain -> powf(10.f, 6.f / 20.f) -> 0x1.fec984p+0 (approximately 1.99526231496888)
 		_linearGain = 0x1.fec984p+0;
-		// The true factor (1, 2, or 4) is determined from the source sample rate in -openReturningError:
+		// The true factor (1, 2, 4, 8, or 16) is determined from the source sample rate in -openReturningError:
 		_decimationFactor = 1;
 	}
 	return self;
@@ -458,6 +465,14 @@ private:
 		case kSFBSampleRateDSD256Variant:
 			_decimationFactor = 4;
 			break;
+		case kSFBSampleRateDSD512:
+		case kSFBSampleRateDSD512Variant:
+			_decimationFactor = 8;
+			break;
+		case kSFBSampleRateDSD1024:
+		case kSFBSampleRateDSD1024Variant:
+			_decimationFactor = 16;
+			break;
 		default:
 			os_log_error(gSFBAudioDecoderLog, "Unsupported DSD sample rate for PCM conversion: %f", asbd->mSampleRate);
 			if(error)
@@ -472,7 +487,7 @@ private:
 	}
 
 	// Generate non-interleaved 32-bit float output at the DSD64 PCM rate regardless of the
-	// source DSD rate (DSD128/DSD256 are decimated a second time after the 8:1 DSD2PCM stage)
+	// source DSD rate (DSD128–DSD1024 are decimated a second time after the 8:1 DSD2PCM stage)
 	_processingFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32 sampleRate:(asbd->mSampleRate / (kSFBPCMFramesPerDSDPacket * kDSDPacketsPerPCMFrame * _decimationFactor)) interleaved:NO channelLayout:_decoder.processingFormat.channelLayout];
 
 	_buffer = [[AVAudioCompressedBuffer alloc] initWithFormat:_decoder.processingFormat packetCapacity:kBufferSizePackets maximumPacketSize:(kSFBBytesPerDSDPacketPerChannel * _decoder.processingFormat.channelCount)];

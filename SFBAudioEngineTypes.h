@@ -46,6 +46,8 @@ CF_ENUM(uint32_t) {
 	kSFBSampleRateDSD256 	CF_SWIFT_NAME(dsd256SampleRate) 	= 11289600,
 	/// Octuple-rate DSD (DSD512) based on 44,100 Hz
 	kSFBSampleRateDSD512 	CF_SWIFT_NAME(dsd512SampleRate) 	= 22579200,
+	/// Sexdecuple-rate DSD (DSD1024) based on 44,100 Hz
+	kSFBSampleRateDSD1024 	CF_SWIFT_NAME(dsd1024SampleRate) 	= 45158400,
 };
 
 /// DSD sample rate variants based on 48,000 Hz
@@ -57,7 +59,9 @@ CF_ENUM(uint32_t) {
 	/// Quad-rate DSD (DSD256) based on 48,000 Hz
 	kSFBSampleRateDSD256Variant 	CF_SWIFT_NAME(dsd256SampleRateVariant) 		= 12288000,
 	/// Octuple-rate DSD (DSD512) based on 48,000 Hz
-	kSFBSampleRateDSD512Variant 	CF_SWIFT_NAME(dsd512SampleRateVariant) 		= 24576000
+	kSFBSampleRateDSD512Variant 	CF_SWIFT_NAME(dsd512SampleRateVariant) 		= 24576000,
+	/// Sexdecuple-rate DSD (DSD1024) based on 48,000 Hz
+	kSFBSampleRateDSD1024Variant 	CF_SWIFT_NAME(dsd1024SampleRateVariant) 	= 49152000
 };
 
 // A DSD packet in this context is 8 one-bit samples (a single channel byte) grouped into

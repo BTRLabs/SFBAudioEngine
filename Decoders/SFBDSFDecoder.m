@@ -42,17 +42,22 @@ static NSError * CreateInvalidDSFFileError(NSURL * url)
 }
 
 // The DSF 'fmt ' parser previously accepted only DSD64 and DSD128, so a DSD256 .dsf failed to
-// open ("not a valid DSF file") before DoP was ever attempted. Accept the same rates
-// SFBDoPDecoder supports (DSD64/128/256 plus the 48 kHz variants of 128/256) — playability at a
-// given rate is decided downstream (DoP or DSD-to-PCM conversion), not by the container parser.
+// open ("not a valid DSF file") before DoP was ever attempted. Accept every recognized DSD
+// rate (DSD64–DSD1024 in both the 44.1 kHz and 48 kHz families) — playability at a given rate
+// is decided downstream (DoP or DSD-to-PCM conversion), not by the container parser.
 static BOOL IsSupportedDSFSampleRate(uint32_t samplingFrequency)
 {
 	switch(samplingFrequency) {
 		case kSFBSampleRateDSD64:
 		case kSFBSampleRateDSD128:
 		case kSFBSampleRateDSD256:
+		case kSFBSampleRateDSD512:
+		case kSFBSampleRateDSD1024:
+		case kSFBSampleRateDSD64Variant:
 		case kSFBSampleRateDSD128Variant:
 		case kSFBSampleRateDSD256Variant:
+		case kSFBSampleRateDSD512Variant:
+		case kSFBSampleRateDSD1024Variant:
 			return YES;
 		default:
 			return NO;
